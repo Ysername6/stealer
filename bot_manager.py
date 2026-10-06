@@ -16,7 +16,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
 
-BOT_TOKEN = "8676286563:AAGproI3CGEvRXuq3wW1yl74uXf7Y-0q7S4"
+BOT_TOKEN = "8676286563:AAFj-JMg4RAOhYYDwmUfViAx7zAN1wWZRO4"
 OWNER_ID  = "155132616"
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 MAX_DOWNLOAD = 18 * 1024 * 1024
